@@ -1,0 +1,530 @@
+---
+id: Unibuy Protocol
+title: Unibuy DEX rotocol v0.1
+hide_title: true
+sidebar_label: Unibuy DEX 协议 v0.1
+---
+
+<style>{`
+.center {
+  width: auto;
+  display: table;
+  margin-left: auto;
+  margin-right: auto;
+}
+`}</style>
+
+# <center> Unibuy DEX 协议 v0.1 </center>
+
+<center> Derik Lu,  ldru0519@gmail.com, July 2025</center>
+
+## 0. 摘要
+Unibuy 是一个基于常量乘积公式实现的类订单簿交易协议。中心化交易所订单簿的价格是用户设定的单点价格，Unibuy 订单簿的价格是常量乘积曲线上用户指定的一个价格区间。
+
+Unibuy 协议为一对交易 Token 设置两个互为镜像关系的单向交易资金池，具有跟 Uniswap 的双向交易资金池相似的交易体验。单向交易对的效果是两个镜像交易对之间总会自动保持一个小的价差，该价差可以有效阻止目前 DEX 交易中大量存在的三明治攻击。
+
+用户的订单基本分成两类：挂单和吃单。挂单是在指定的价格范围内卖出指定数量的 $\small token_0$，要求价格范围的低端价格镜像转换后，必须低于关联镜像交易对的当前价格，确保挂单交易不会立即成交。吃单是在不超过指定最高限价的前提下买入指定数量的 $\small token_0$ 或卖出指定数量的 $\small token_1$，要求最高限价必须高于交易对的当前价格，吃单交易总是立即成交。
+
+单向交易对总是卖出 $\small token_0$，买入$\small token_1$，关联镜像交易对中 $\small token_0$ 和 $\small token_1$ 的定义是相反的。挂单交易从挂单用户看，总是卖出 $\small token_0$，买入 $\small token_1$。吃单交易从交易用户角度看，则是卖出 $\small token_1$，买入 $\small token_0$。挂单与吃单互为交易对手，同一 Token 的买入、卖出交易是由两个关联的镜像交易对完成的。
+
+用户的吃单交易总是驱动 $\small token_0$ 价格沿着常量乘积曲线单向上升，而用户的挂单交易则可能驱动当前交易对的价格下降。Unibuy 协议的用户挂单全部或部分成交后，如果价格逆转，用户挂单不会像 Uniswap 协议一样，被动买入已出售 $\small token_0$，这可以解决 Uniswap 协议的做市商无偿损失问题。
+
+Unibuy 协议设计了区间流动性再平衡机制以及挂单前向补偿机制，可以解决挂单交易中可能隐含存在的内部交易套利问题，实现不同价格区间的用户挂单流动性的聚合。
+
+Unibuy 协议的流动性由用户的挂单提供，没有 Uniswap 协议中的自动做市商的角色，用户的交易费用全部成为 Unibuy 协议的协议收入。
+
+## 1. 导言
+
+Uniswap$^{[1,2,3,4]}$ 协议持续升级，从 v1/v2 到 v3/v4，不断改进和优化常量乘积自动做市商 CPAMM 机制的具体实现方式，提升做市资金的利用效率，成为 Defi 领域公认的 DEX 龙头应用，其核心机制被很多 Web3 项目效仿。但是，Uniswap 类型的 DEX 也面临不少问题。
+
+### 1.1 协议收入问题
+
+Uniswap 协议中，需要流动性提供商提供用于用户交易的流动性，作为回报，流动性提供商获得绝大部分交易用户所支付的交易手续费，DEX 项目方只能获得交易手续费的很小一部分。Uniswap 为分割交易手续费设置了开关，需要通过投票才能打开开关，甚至导致 Uniswap 无法从用户的交易收费中获益。 
+
+### 1.2 无偿损失问题
+
+常量乘积自动做市商机制，虽然解决了 Token 交易中的自动定价问题，但也不可以避免地带来难以解决的无偿损失问题$^{[5]}$。专业做市商只能通过随时监控交易对的状态，根据交易对的价格变化，及时调整流动性的分布，一定程度上缓解无偿损失的问题。普通 Web3 用户对此则无能为力，如果长期加入流程性而不做及时调整，有限的做市收益，往往无法抵消遭受的无偿损失，这会大大打击普通用户参与做市的积极性，影响 DEX 流动性的来源。
+
+### 1.3 三明治攻击问题
+
+Uniswap 交易对是双向交易对，Token的卖出价格同时也是Token的买入价格，用户交易后，Token 价格会沿着常量乘积曲线发生滑动，这很容易招致三明治攻击。攻击者可以抢先在用户的大额交易前，发起相同方向的买入或卖出交易，使得交易对的 Token 价格发生不利于交易用户的滑动，待用户交易完成后，攻击者再发起一笔反向交易，从中套利。从链上交易信息中，可以找到大量这样的攻击交易。针对三明治攻击，虽然提出不少解决方案$^{[6,7]}$，但难以普遍适用。
+
+Unibuy 协议从设计机制上，可以原生解决上述三大问题。
+
+### 1.4 Unibuy 协议的解决方案
+
+Unibuy 协议采用类似于中心化交易所的订单簿机制，不再存在流动性做市商的角色，用户的交易手续费全部归属于 Unibuy 协议运行方，从而可以天然解决交易手续费的分配问题。
+
+与中心化交易所的订单簿类似，Unibuy 协议的流动性由等待成交的用户挂单提供。用户的吃单交易成交后，交易对收到的 $\small token_1$ 不会再投入交易，而是即刻离场，不会像常量乘积做市协议一样，做市资金反复被动地买入或卖出。由于不存在做市商的角色，自然也就不存在做市资产因价格大幅变化遭受无偿损失的问题。
+
+Unibuy 协议的订单簿交易机制要求交易对的交易是单向的，为实现 Token 的双向买卖交易，需要两个相互关联的互为镜像的单向交易对来实现。这种单向交易对的设计只是一种内部技术实现方式，不会影响交易用户的交易体验。但单向交易对的技术实现带来一个效果，即这两个镜像交易对中，同一 Token 的买入和卖出价格会天然地保持一个价差，这个天然存在的价差能够有效抵御三明治攻击。攻击者虽然可以抢跑完成交易，但因为抢跑交易无法影响镜像交易对的 Token 价格，也就无法通过反向交易完成套利，使得抢跑没有意义。
+
+### 1.5 与 CEX 订单簿的区别
+
+Unibuy 协议的订单簿和中心化交易所的订单簿也是有区别的。
+
+在中心化交易所，用户发出买入或卖出订单，如果订单能够与已有的订单簿中的订单匹配，则直接成交，称为为吃单。如果不能直接成交，则订单会添加到订单簿，并在交易界面中显示，等待新进订单进行匹配。订单中的价格是一个单点价格，订单簿中的订单合在一起是价格数轴上离散的点。
+
+Unibuy 协议中，订单的价格不是一个单点价格，而是一个价格范围，在这个价格范围内，订单中给定数量的 Token 会按照常量乘积曲线自动成交。Unibuy 协议会根据用户给出的参数，自动执行吃单和/或挂单交易，如果订单只能部分成交，按照用户的要求，未成交部分可以转为挂单等待后续吃单，也可以部分成交后直接结束交易。所有价格区间的区间流动性叠加在一起，成为吃单交易的流动性。
+
+Unibuy 协议不使用中心化交易所采用的按照价格及下单顺序进行订单匹配的交易规则。Unibuy 协议将所有挂单资产聚合在一起，为吃单交易提供流动性，吃单交易按照常量乘积曲线定义的规则，确定买入/卖出 Token 的数量。
+
+Unibuy 协议的挂单在区块链上是公开可见的，是真实的用户订单，可以避免中心化交易所的虚假订单、冰山订单等误导交易用户的问题。由于区块时间的不连续性，以及交易的竞争性，在区块链上进行虚假挂单，会面临很大风险，没有利用价值。
+
+中心化交易所挂单交易的交易费率一般都会低于吃单交易，从而鼓励用户挂单提供流动性。Unibuy 协议挂单交易不管是否成交，都是是免费的。
+
+曾经有一些项目尝试实现订单簿功能的 DEX，如 EtherDelta$^{[8]}$、Serum$^{[9]}$ 等，但这些项目只是将传统 CEX 订单簿的功能简单复制到区块链上，缺少技术上的创新，没有结合和利用区块链的特点，由于各种原因，也都不太成功。在链上实现订单簿功能应该需要在技术层面做一些突破和创新。
+
+### 1.6 Unibuy 协议
+
+Unibuy 是一个提供订单簿功能的去中心化交易协议。该协议结合了常量乘积自动做市商的机制，以及中心化交易所订单簿的功能特点，既能够聚合用户的挂单资产为吃单交易提供流动性，又不需要在链上实现复杂的订单匹配机制，希望能够探索出一个实现链上订单簿功能 DEX 的可行之路。
+
+Unibuy 协议为一对交易 Token 设置两个互为镜像的交易对，每个交易对提供单一 Token 的卖出服务，两个单向交易对关联在一起，实现 Token 交易对的买入/卖出服务。
+
+利用两个关联的单向交易对实现 DEX 协议的想法，FeSwap$^{[10]}$ 曾经进行过尝试。Feswap 利用这一设计实现了一个完全免费但又有做市收益的 DEX。该项目由于缺少推广，用户不多，但也一直在持续运行，积累了不少链上交易。Unibuy 协议的关联单向交易对的设计，表面类似，但却是一个完全不同的链上订单簿功能的技术实现。
+
+为了聚合不同用户、不同价格范围、不同批次的挂单流动性，Unibuy 设计了流动性再平衡机制、以及挂单用户的前向补偿机制，使得挂单的流动性可以聚合在一起为吃单交易提供流动性，避免实现非常复杂的类似于中心化交易所的订单匹配及清算机制。下面详细描述Unibuy 协议的技术方案。
+
+## 2. Unibuy 交易协议
+
+### 2.1 区间流动性基础
+
+在 Uniswap v3/v4 中，为了提高做市资金的利用效率，做市商可以指定做市的价格范围，从而避免资金分布于永远不会触及的价格区间，造成资金浪费。Uniswap 引入 $\small tick$ 概念，tick 是离散的不连续的整数，可以对应到交易对的 Token 价格，利用 $\small tick$ 可以将做市资金分割成多个不同的价格区间，使得同一价格范围的做市资金能够相互聚合，统一参与 Token 买卖交易。而当交易对的价格发生变化，跨越价格区间时，再对交易对的流动性参数进行调整，使得交易对在每个价格区间，都服从常量乘积公式，只是流动性参数不同。
+
+通过 $\small tick$ 限定做市资金的价格范围，做市商提供的资金只要能够覆盖指定的价格范围即可，相对于 Uniswap v1/v2 中 $\small (0, \infty)$ 的做市价格范围，同等做市资金规模可以提供更多的交易流动性，这就是 Uniswap 虚拟流动性的概念。
+
+<div style={{ textAlign: "center" }}>
+  <img src="/img/curve.png" alt="Curve" width="50%" />
+</div>
+
+<center> 图1. 区间流动性 </center>
+
+图1 是一个价格区间，也即 $\small tick$ 区间的示意图，其价格范围为 $\small (P_a, P_b)$，虚拟流动性常量为 $\small L$，交易对两个 Token 的虚拟数量为 $\small x, y$，恒定乘积公式表示为：
+
+$$ 
+  \small x * y = L^2 \tag{2.1.1} 
+$$
+
+形式上，该公式与 Uniswap v1/v2 中的恒定乘积公式的表示形式是一样，但含义是有区别的。Uniswap v1/v2 中，恒定乘积公式中的 $\small x,y$ 是两种资产的真实数量，常数 $\small L$ 在整个价格空间内保持不变。而在 Uniswap v3/v4 以及 Unibuy 协议中，$\small x,y$ 是两种资产的虚拟数量，常数 $\small L$ 只是在 $\small tick$ 区间内部保持不变，而不同 $\small tick$ 区间的 $\small L$ 往往是不一样的。
+
+Unibuy 协议内部，真正具有实际意义的是，价格区间虚拟资产数量的差，即 $\small \Delta x, \Delta y$，其满足如下公式：
+
+$$ 
+  \small \Delta x = (\frac{1}{\sqrt{P_a}}- \frac{1}{\sqrt{P_b}}) * L \tag{2.1.2} 
+$$
+
+$$ 
+  \small \Delta y = (\sqrt{P_b}- \sqrt{P_a}) * L \tag{2.1.3} 
+$$
+
+$$ 
+  \small \frac{\Delta y}{\Delta x} = \sqrt{P_a * P_b }   \tag{2.1.4} 
+$$
+
+在 Unibuy 协议中，当用户挂单在 $\small (P_a, P_b)$ 价格范围出售数量为 $\small \Delta x$ 的一种资产时，利用公式 $\small (2.1.2)$，可以计算出与挂单资产相对应的该价格区间的虚拟流动性 $\small L$，协议内部会记录用户加入的虚拟流动性 $\small L$。同一价格区间不同用户的虚拟流动性的简单叠加，就可以实现虚拟流动性的聚合。
+
+当用户吃单时，由于虚拟流动性常量 $\small L$ 已知，根据希望卖出的资产数量 $\small \Delta y$ 或者希望买入的资产数量 $\small \Delta x$，利用公式 $\small (2.1.3)$ 或 $\small (2.1.2)$ 就可以计算出交易对的价格变化，进而得到对应的 $\small \Delta x$ 或 $\small \Delta y$。
+
+公式 $\small (2.1.4)$ 的含义是 $\small \Delta x$ 的一种资产与 $\small \Delta y$ 的另一种资产在 $\small (P_a, P_b)$ 价格范围内互换时，其平均价格为 $\small \sqrt{P_a * P_b}$。
+
+## 2.2 单边流动性
+
+Unibuy 协议继承了 Uniswap v3/v4 虚拟流动性的设计，所有的流动性分割成不同的 $\small tick$ 区间，也即价格区间，在同一个 $\small tick$ 区间内，虚拟流动性常量 $\small L$ 保持不变。交易过程中，当交易对的价格发生变化，并且跨越 $\small tick$ 边界时，流动性常量 $\small L$ 会根据跨越 $\small tick$ 记录的信息，进行相应调整。
+
+但是 Unibuy 协议 与 Uniswap 协议也有很大的不同。Uniswap 在 $\small tick$ 区间内的交易是双向的，而 Unibuy 协议在 $\small tick$ 区间内的交易是单向的。这个区别决定了 Unibuy 协议的流动性只存在于交易对当前价格的上方，而 Uniswap v3 交易对的流动性是可以分布于整个价格空间的。下图是 Unibuy 协议的流动性分布示意图。
+
+<div style={{ textAlign: "center" }}>
+  <img src="/img/liquidity.png" alt="Liquidity" width="50%" />
+</div>
+
+<center> 图1. 流动性分布 </center>
+
+Uniswap 协议中，同一个交易对支持 $token_0$ 和 $\small token_1$ 的相互交换，流动性提供商提供可供交易的流动性，交易用户支付约 $\small 0.3\%$ 的交易手续费，流动性提供商赚取该手续费，Uniswap 收取交易手续费中的一小部分，或者不收取手续费。
+
+Unibuy 协议中，没有流动性提供商的角色，交易的流动性是由用户的挂单提供的。挂单交易只需要提供一种 Token 资产，Unibuy 协议定为 $\small token_0$，吃单交易总是用 $\small token_1$ 换取交易对中的 $\small token_0$。交易用户买入或卖出 $\small token_0/token_1$ 的功能实际上是由两个相互关联互为镜像的单向交易对提供的。Uniswap 协议中的增加流动性、撤回流动性、兑换交易的功能，可以跟 Unibuy 协议中的挂单、撤单、吃单对应。从用户角度看，Unibuy 协议提供的功能更接近于中心化交易所的用户体验。Unibuy 协议中，吃单交易需要支付一定的交易手续费，挂单交易是免费的，不管是否成交都不需要支付交易手续费。吃单交易的交易手续费完全归属于 Unibuy 协议项目方。
+
+### 2.3 单向交易对
+
+DEX 协议总是需要提供双向交易功能的，Unibuy 协议的双向交易功能，是由两个关联在以一起的、互为镜像的单向交易对实现的。在两个关联的交易对中，$\small token_0, token_1$ 的定义是相反的。比如有两个资产 Token A/B，在一个交易对中 Token A 是 $\small token_0$，Token B 是 $\small token_1$，在另一个镜像交易对中 Token A 一定是 $\small token_1$，Token B 是 $\small token_0$。由于这种对称关系，两个镜像关联交易对的功能逻辑是完全一样的，即用户总是用 $\small token_1$ 交换交易对中用户挂单卖出的 $\small token_0$。相互关联的两个单向交易对，只是一种内部的技术实现，挂单用户和吃单用户无需关注该技术细节，不会影响用户体验。
+
+当用户挂单时，需要设定卖出 $\small token_0$ 的价格范围及数量，所有的用户挂单聚合在一起，形成交易对的流动性。用户吃单时，交易对手是聚合在一起的挂单的流动性。由于吃单交易总是用 $\small token_1$ 交换 $\small token_0$，所以吃单交易总是造成 $\small token_0$ 的价格单向上涨。
+
+用户挂单时指定的价格范围，可以高于或低于交易对的当前价格，但低端价格镜像转换后不得高于镜像交易对中的当前价格，(镜像交易对的价格是本交易对价格的倒数)。原因是如果高于关联交易对的当前价格，高于价格的部分是可以在关联交易对中立即成交的。Unibuy 协议可以根据用户给出的价格范围，以及交易对的当前状态，将用户订单按照挂单或吃单处理，如果需要，可以先按照吃单部分成交，未成交部分按照挂单处理。
+
+如果用户挂单的低端价格低于交易对的当前价格，交易成功后，低端价格会成为交易对的当前价格，该价格会成为后续吃单交易的起点价格。但如果挂单的低端价格高于当前价格，则不会修改交易对的当前价格。
+
+## 3. Unibuy 内部机制
+
+Unibuy 协议单向交易机制的设计虽然可以解决三明治攻击、协议收入等问题，但也为聚合不同挂单的流动性，以及正确计算用户挂单的成交收入也带来不小的复杂性，Unibuy 协议设计了再平衡机制、内部交易补偿机制等机制来处理这种复杂性。
+
+### 3.1 流动性再平衡机制
+
+用户挂单时，如果指定价格范围 $\small (P_l, P_u)$ 的低端价格 $\small P_l$ 低于交易对的当前价格 $\small P_0$ ，会触发流动性再平衡机制。原因是在交易对的当前价格区间，流动性可能是部分成交的。而用户挂单的价格区间跟当前的价格区间可能有重叠，这两类流动性是没法直接聚合在一起的。需要将部分成交的流动性再平衡到需要的价格区间，才能进行流动性的叠加。另外，这类挂单交易挂单成功后，$\small P_l$ 会成为交易对的最新价格，这也需要将当前价格区间的流动性进行再平衡，便于聚合后面的流动性。
+
+新加入的流动性，相对于当前的价格区间，可能存在图 3 所示的 10 种情况，其中 1/2/5 由于 $\small P_l$ 高于当前价格 $\small P_0$，不需要进行流动性再平衡，其他几种情况都需要进行流动性再平衡。4/7/10 需要再平衡到当前流动性区间的低端价格 $\small P_a$ ，8/9 需要再平衡到新加流动性的高端价格 $\small P_u$ ，3/6 需要再平衡到新加流动性的低端价格 $\small P_l$。
+
+<div style={{ textAlign: "center" }}>
+  <img src="/img/position1.png" alt="Liquidity1" width="40%" />
+</div>
+
+<div style={{ textAlign: "center" }}>
+  <img src="/img/position2.png" alt="Liquidity2" width="40%" />
+</div>
+
+<div style={{ textAlign: "center" }}>
+  <img src="/img/position3.png" alt="Liquidity3" width="40%" />
+</div>
+
+<center> 图3. 挂单价格相对位置 </center>
+
+再平衡后的价格区间的高端价格 $\small P_b$ 保持不变，低端价格 $\small P_r$ 由下式决定:
+
+$$ 
+  P_r = \left\{ 
+  \begin{aligned} 
+  \ \ &P_u    &(tick_u \geqslant tick_a) \ \& \ (tick_u \leqslant tick_0) \\
+  \ \ &P_l    &(tick_l \geqslant tick_a) \ \& \ (tick_l \leqslant tick_0) \\
+  \ \ &P_a    &others \\
+  \end{aligned} 
+  \right. \tag{3.1.1} 
+$$ 
+
+其中 $\small tick_a, tick_b, tick_0,,tick_u, tick_l$ 分别是为与价格 $\small P_a, P_b, P_0, P_u, P_l$ 对应的 $\small tick$，该公式仅适用于  $\small tick_l \leqslant tick_0$ 的情况，$\small tick_l \gt tick_0$ 时不需要再平衡。上式中，$\small P_r$ 的赋值顺序为 $\small P_u \gt P_l \gt P_a$，即如果满足 $\small P_u$ 条件，则 $\small P_r = P_u$，否则如果满足 $\small P_l$ 条件，则 $\small P_r = P_l$，否则 $\small P_r = P_a$。
+
+当 $\small P_r = P_u$ 或 $\small P_l$，需要对当前流动性区间进行拆分处理，将 $\small (P_a, P_r)$ 之间的流动性按照已经完全成交处理，处理顺序是先进行流动性区间进行拆分，再进行流动性再平衡。
+
+设当前交易对的价格为 $\small P_0$，再平衡后新的价格范围为 $\small (P_{r}, \ P_{b})$，当前流动性区间的流动性为 $\small L_1$。由于当前价格为 $\small P_{0}$ ，意味着当前流动性区间只在 $\small (P_{0}, P_{b})$ 之间还有流动性，$\small (P_a, P_0)$ 之间的流动已经成交卖出。再平衡的目的是让未成交的 $\small token_0$ 重新布满整个 $\small (P_{r}, P_{b})$ 价格空间，从而可以与新加入的流动性进行聚合。再平衡之后，由于当前流动性区间可供出售的 $\small token_0$ 数量不变，根据公式 $\small (2.1.2)$，新的虚拟流动性 $\small L_2$ 满足：
+
+$$
+  \begin{aligned} (\frac{1}{\sqrt{P_{r}}} - \frac{1}{\sqrt{P_{b}}}) * L_{2} = (\frac{1}{\sqrt{P_{0}}} - \frac{1}{\sqrt{P_{b}}}) * L_1 \end{aligned} \tag{3.1.2}
+$$
+
+$$
+  \begin{aligned} L_{2} = \frac{\sqrt{P_{b}}-\sqrt{P_{0}}}{\sqrt{P_{0}}} * \frac{\sqrt{P_{r}}}{\sqrt{P_{b}}-\sqrt{P_{r}}} * L_1 \end{aligned} \tag{3.1.3}
+$$
+
+同时有：
+
+$$
+  \begin{aligned} L_{1} - L_{2} = \frac{\sqrt{P_{0}}-\sqrt{P_{r}}}{\sqrt{P_{0}}} * \frac{\sqrt{P_{b}}}{\sqrt{P_{b}}-\sqrt{P_{r}}} * L_1 \end{aligned} \tag{3.1.4}
+$$
+
+再平衡是将当前价格区间未成交的剩余流动性，重新分配到再平衡后的新的完整价格区间 $\small (P_r, P_b)$，与低端 $\small tick_r$ 对应的 $\small tickInfo$ 结构中的 $\small LiquidityNet$ 会更新为 $\small L_{2}$，再平衡后净流动性减少的数量为 $\small L_1 - L_2$。
+
+再平衡机制除了影响当前价格区间的流动性外，也会影响当前交易对的价格，再平衡后，新加入流动性的低端价格成为交易对的最新价格。没有进行再平衡的情况，交易对的价格维持不变。用户的吃单交易总是导致交易对的价格单向上涨，而用户的挂单可能会由于更低价格流动性的加入导致交易对价格的下跌。
+
+由于再平衡机制的设计，用户的价格范围为 $\small (P_a, P_b)$ 的流动性并不能保证最终会按照 $\small \sqrt{P_a * P_b}$ 的平均价格卖出，经过多次再平衡后，实际 $\small token_0$ 卖出的平均价 $\small P_m$ 会满足 $\small P_a < P_m \leqslant \sqrt{P_a * P_b}$ 。这个设计可以让用户的流动性在用户指定的价格范围内以最快的速度成交，同时由于常量乘积定价曲线的约束，又可以尽量保证流动性有最好的成交价格。
+
+## 3.2 内部交易补偿机制
+
+当用户挂单时，新订单的流动性会跟已经存在的流动性聚合在一起，为吃单交易提供作为交易对手的流动性。而已经存在的流动性在其价格区间内可能已经部分成交，并且已经通过再平衡机制将剩余 $\small token_0$ 重新分布到其流动性空间的整个价格区间。而新加入的流动性，在该价格区间是完全未成交的流动性，与已经存在的流动性是内在价值不同的流动性。另一方面，由于常量乘积交易机制的限制，这两种流动性必须聚合在一起，参与吃单交易的统一处理。为解决这一问题，Unibuy 协议设计了内部交易补偿机制，在考虑先期挂单拥有价值优势的前提下，使得不同挂单不同交易状态的流动性能够获得内在一致的价值，既可以统一参于吃单交易处理，又可以在清算用户的订单时，正确计算不同订单的内含价值。
+
+内部交易补偿机制只针对已部分成交的价格区间，完全没有成交的价格区间，或者已经完全成交的价格区间，不需要进行补偿机制处理。
+
+假设在加入流动性前，流动性区间的总流动为性 $\small L_1$，已经部分成交，收到  $\small token_1$ 的数量设为 $\small R$。经过再平衡后，剩余的净流动性为 $\small L_2$。设新加入的流动性为 $\small L_d$，加入新的流动性后，该流动性区间的总流动性为 $\small L_1 + L_d$，总的净流动性为 $\small L_2 + L_d$，接收到的 $\small token_1$ 数量依然是 $\small R$，状态如下表所示:
+
+$$ 
+  \small \newcommand{\arraystretch}{1.8} \begin{array}  {| c ||  c | c | c |}
+  \hline
+  \text{区间流动性状态} &\text{总流动性}  &\text{净流动性}     &token_1\ \text{数量} \\
+  \hline
+  \text{加入新流动性前}  &{L_1}        &L_2          &R \\
+  \hline
+  \text{加入新流动性后}  &{L_1 + L_d}  &{L_2 + L_d}  &R \\
+  \hline  
+  \text{撤回新流动性后}  &{L_1}    &{\dfrac{L_1}{L_1 + L_d} * (L_2 + L_d)}  &{\dfrac{L_1}{L_1 + L_d}} * R \\[0.15cm]
+  \hline  
+ \end{array}
+$$
+
+由于用户的资产权益总是按照占有总流动性的比例计算，如果后发用户 (后称用户 $\small 2$) 在加入流动性后立即撤走订单，该用户得到的 $\small token_1$ 的数量 $\small R_{x}$ 为：
+
+$$
+  \begin{aligned} \small R_x = \frac{L_d}{L_1+ L_d} * R \end{aligned} \tag{3.2.1}
+$$
+ 
+ 撤回的流动性为 $\small L_d * (L_2+ L_d) / (L_1+ L_d)$，相对于用户 $\small 2$ 初始加入的流动 $\small L_d$，流动性减少了，减少的数量 $\small L_x$ 为:
+
+$$
+  \begin{aligned} \small L_x = \frac{L_d}{L_1 + L_d} * (L_1 - L_2) \end{aligned} \tag{3.2.2} 
+$$
+  
+流动性的减少就是 $\small token_0$ 的减少，这相当于用户 $\small 2$ 用一部分 $\small token_0$ 换取了数量为 $\small R_x$ 的 $\small token_1$，这是一种内部交换。与流动性 $\small L_x$ 相对应的内部交换出去的 $\small token_0$ 的数量 $\small S_x$ (相当于用户 $\small 2$ 立即撤回流动性，减少的 $\small token_0$ 数量)为:
+
+$$
+  \begin{aligned} \small S_x \ = \ &(\frac{1}{\sqrt{P_r}} - \frac{1}{\sqrt{P_b}}) * L_x \\[3mm]
+  = \ &\frac{L_d}{L_1 + L_d} * (\frac{1}{\sqrt{P_r}} - \frac{1}{\sqrt{P_0}}) * L_1 \\
+  \end{aligned} \tag{3.2.3} 
+$$
+
+成功撤回订单后，用户 $\small 2$ 相当于用价格范围为 $\small (P_r, P_b)$，数量为 $\small L_x$ 的流动性对应的数量为 $\small S_x$ 的 $\small token_0$ 换取了数量为 $\small R_x$ 的 $\small token_1$。由于 $\small (L_1-L_2)$ 的 $\small token_0$ 流动性价值，等价于数量为 $\small R$ 的 $\small token_1$，该内部交换价值上是合理的。不难验证，$ \small R_x = S_x * \sqrt{P_r * P_0}$，$\small \sqrt{P_r * P_0}$ 为内部 $\small token_0$ 与 $\small token_1$ 互换的平均价格。
+
+相应地，订单撤离后，该价格区间的流动性相对于新加订单前的流动性 $\small L_2$，增加了 $\small L_d * ( L_1 - L_2 ) / (L_1 + L_d)$ ，也即 $\small L_x$，但 $\small token_1$ 的数量变为 $\small R * L_1 / (L_1 + L_d)$，相对于一开始的数量 $\small R$，减少了 $\small R_x$ ，这等同于该流动性区间用数量为 $\small R_x$ 的 $\small token_1$，换取了等价值的 $\small token_0$ 流通性。
+
+虽然该内部交换按照流动性再平衡时交易对的状态考虑，价值上是等价的，但是该交换对于先期加入流动性的用户来说，(后面统称用户 $\small 1$，代表一个或多个用户)，却是不合理的。原因是只要触发内部交换机制，用户 $\small 1$ 已成交的流动性的成交价格，一定会高于交易对的当前价格，或新加入流动性的低端价格。如果没有合理的机制对先加入流动性的用户 $\small 1$ 进行补偿，相当于后面的用户 $\small 2$ 用一定数量的 $\small token_0$ 以高于交易对的当前价格换成了 $\small token_1$，这实际上是用户 $\small 2$ 对先加入流动性用户的隐形套利，是不合理的。Unibuy 协议设计了内部交易补偿机制，让用户 $\small 2$ 对用户 $\small 1$ 按照规则进行合理的补偿。该补偿机制可以消除隐形套利的不合理性，并让用户 $\small 1$ 获得一定的先发优势。在中心化交易所，同等价格情况下，订单是按照用户的挂单先后顺序进行匹配的，先挂单用户有一定的先发优势。而 Unibuy 协议不处理用户订单的时间顺序，用户的先发优势是通过内部补偿机制体现的。
+
+Unibuy 协议的补偿包含两个部分，一是内部交易补偿费，用 $C_a$ 表示 ；一是内部交易价差补偿费，用 $C_b$ 表示，下面分别介绍。
+
+### 3.2.1 内部交易补偿费
+
+Unibuy 协议规定，Unibuy 协议后期挂单的用户 $\small 2$，需要按照设置的内部交易补偿费率，以及内部交易金额，支付内部交易补偿费。内部交易补偿费以 $\small token_1$ 支付，设交易补偿费费率为 $\small r$ ，内部交易补偿费金额为：
+
+$$ 
+  \small \begin{aligned} C^{'}_{a} = r * \frac{L_{d}}{L_{1} + L_{d}} * R \end{aligned} \tag{3.2.1.1}
+$$
+
+由于内部交易补偿费是所有 $\small tickInfo$ 中记录的流动性都会按比例分配，包括用户 $\small 2$ 自己。为了确保用户 $\small 1$ 能够得到上面的补偿费，用户 $\small 2$ 支付的名义补偿费为：
+
+$$ 
+  \small \begin{aligned} C_{a} = r * \frac{L_{d}}{L_{1}} * R \end{aligned} \tag{3.2.1.2}
+$$
+
+易于验证，用户 $\small 1$ 按比例得到的 $\small token_1$ 金额为：
+
+$$ 
+  \small \begin{aligned} \frac{L_{1}}{L_{1} + L_{d}} * (R + C_{a}) = \frac{L_{1}}{L_{1} + L_{d}} * R + r * \frac{L_{d}}{L_{1} + L_{d}} * R \end{aligned} \tag{3.2.1.3}
+$$
+
+上式第一项正是在不考虑补偿时，用户 $\small 1$ 应得到的 $\small token_1$ 交易收入，第二项是获得的交易补偿费，即 $\small (3.2.1.1)$ 中的 $\small C^{'}_a$。
+
+用户 $\small 2$ 按比例得到的 $\small token_1$ 金额为：
+
+$$ 
+  \small \begin{aligned} \frac{L_{d}}{L_{1} + L_{d}} * R - r * \frac{L_{d}}{L_{1} + L_{d}} * R \end{aligned} \tag{3.2.1.4}
+$$
+
+上式第二项正是用户 $\small 2$ 支付的内部交易补偿费。Unibuy 协议实现中，实际记录并处理的补偿金额是 $\small C_{a}$，而不是 $\small C^{'}_{a}$。内部交易补偿费率一般设置为 $\small 0.2\%$。
+
+### 3.2.2 内部交易价差补偿费
+
+如上所述，如果新订单的价格区间跟已经部分成交的价格区间重叠，需要通过补偿机制，避免不合理的套利机会。新旧流动性聚合时，隐含的内部交换以 $\small token_1$ 计算，数量为 $\small (3.2.1)$ 中的 $\small R_x$。Unibuy 协议规定，该内部交易以交易对的当前价格 $\small P_0$ 计价。($\small P_0$ 为挂单成交后的 $\small P_0$，其值为挂单价格区间的低端价格，与挂单时交易对的当前价格，二者之中的最低价格)。虽然 $\small R_x$ 的平均交易价格为 $\small \sqrt{P_a * P_x}$，$\small P_x$ 是流动性再平衡时交易对当时的价格 $\small P_0$，$\small P_a$ 是 (3.1) 中所所说的 $\small P_r$，但因为 $\small P_x$ 是不确定的，Unibuy 取价格范围 $\small (P_a, P_b)$ 的高端价格 $\small P_b$ 计算 $\small R_x$ 的名义价值，由于 $\small P_0$ 与 $\small \sqrt{P_a *P_b}$ 之间的价差产生的套利空间，用户 $\small 2$ 需要以内部交易价差补偿费的形式，补偿给先期加入流动性的用户。假设该补偿费用 $\small C_b$ 表示，$\small C_b$ 应满足下面的公式：
+
+$$ 
+  \small \begin{aligned} \frac{P_0}{\sqrt{P_a* P_b}} = \frac{\cfrac{L_d}{L_1 + L_d} *(R+C_b) - C_b}{\cfrac{L_d}{L_1 + L_d} * R}  \end{aligned} \tag{3.2.2.1}
+$$
+
+上式的基本逻辑是加入价差补偿处理后，用户 $\small 2$ 的 $\small token_1$ 实际所得与名义所得的比例应满足 $\small P_0 / \sqrt{P_a * P_b}$ 的比例关系，上式简化后得到 $\small C_b$ 为:
+
+$$ 
+  \small \begin{aligned} C_b = (1 - \frac{P_0}{\sqrt{P_a* P_b}}) * {\cfrac{L_d}{L_1} * R}  \end{aligned} \tag{3.2.2.2}
+$$
+
+  ### 3.2.3 合计内部交易补偿费
+
+$\small C_a$ 与 $\small C_b$ 合在一起就是用户 $\small 2$ 需要支付的总的补偿费用，用 $\small C$ 表示为:
+
+$$ 
+  \small \begin{aligned} C = (1 - \frac{P_0}{\sqrt{P_a* P_b}} + r) * {\cfrac{L_d}{L_1} * R}  \end{aligned} \tag{3.2.3}
+$$
+
+用户挂单时，其挂单价格区间可能会与多个部分成交的流动性区间重叠并聚合，Unibuy 协议会计算该挂单所有聚合价格区间的补偿金额，并将累积补偿金额记录在挂单交易的记录信息内。当用户撤回或清算该挂单时，会先根据用户的流动性比例，计算用户收到的 $\small token_1$ 名义总额，并从中扣除总补偿金额，作为用户最终收到的 $\small token_1$ 金额。
+
+一个价格区间可能会多次加入新的挂单，并按照上面的规则计算补偿金额。每个 $\small tick$ 的 $\small tickInfo$ 中会记录总的 $\small token1$ 挂单交易收入金额，以及总的补偿金额。当用户撤出交易挂单时，总的 $\small token1$ 收入金额会与总的补偿金额合在一起，按照用户的流动性比例，计算该用户的 $\small token_1$ 实际收入金额。
+
+虽然在用户撤出流动性时，内部交易补偿费参与收益计算，但其具有零和属性，即所有流动性价格区间的交易补偿费收益总和，一定等于所有用户订单信息中记录的作为扣除金额的内部交易补偿费金额总和，两者是相互抵消的。内部交易补偿费只是协议内部的一种处理机制，不会对不相关的流动性价格区间产生影响，对于外部吃单交易也是完全透明的，只是在用户挂单或撤销挂单时需要进行相关处理。
+
+### 3.3 流动性区间拆分
+
+用户挂单时，如果给定价格区间 $\small (P_l, P_u)$ 的价格边界 $\small P_l$ 和/或 $\small P_u$ 处于某个流动性区间 $\small (P_a, P_b)$ 的中间，并且该流动性区间是部分成交的，此时需要对该流动性区间进行拆分处理，即将流动性区间拆成上下两个流动性区间 $\small (P_a, P_s)$ 和 $\small (P_s, P_b)$，其中 $\small P_s$ 为 $\small P_u$ 和/或 $\small P_l$。流动性区间拆分的目的是为了进行流动性聚合，流动性区间拆分会将部分成交接收到的数量为 $\small R$ 的 $\small token_1$ 按照下面的公式拆成上下两个部分 $\small R_u, R_l$：
+
+$$
+  \begin{aligned} \small 
+  R_u \ = \ &\frac{\sqrt{P_b} - \sqrt{P_r}}{\sqrt{P_b} - \sqrt{P_a}} * R \\[3mm]
+  R_l \ = \ &R - R_u \\[3mm]
+  \end{aligned} \tag{3.3} 
+$$
+
+如果该流动性区间存在内部交易补偿费用，也要按照上面的规则进行拆分。
+
+## 3.4 技术实现
+
+下面介绍 Unibuy 协议在合约实现层面的关键技术点。
+
+### 3.4.1 全局状态
+
+Unibuy 智能合约内，每个交易对包含下表所示的全局状态：
+
+$$ 
+  \small \newcommand{\arraystretch}{1.8} \begin{array}  {| c ||  c | c |}
+  \hline
+   \hspace{0.6cm} \text{类型} \hspace{0.6cm} & \hspace{1cm} \text{变量名称} \hspace{1cm}  &\hspace{0.6cm} \text{标识} \hspace{0.6cm}   \\
+  \hline
+  uint32  &{poolHeight}        &{H_g}           \\
+  \hline
+  uint160  &{sqrtPriceX96}        &{\sqrt{P_0}}           \\
+  \hline
+  uint24  &{tick}  &{I_t}  \\
+  \hline
+  uint8  &{takerFee}  &{F_t}  \\
+  \hline
+  uint8  &{makerFee}  &{F_m}  \\
+  \hline
+  uint8  &{offsetFee}  &{F_o}  \\
+  \hline
+  uint8  &{maxTickGap}  &{G_t}  \\
+  \hline  
+ \end{array}
+$$
+
+交易对会维护一个全局高度参数 $\small H_g$，初始值 从 1 开始，每当交易对价格上涨，跨越上方 $\small tick$ 时，$\small H_g$ 便加 1。当用户挂单时，用户的挂单信息中，会记录挂单当时 $\small H_g$ 的值。在用户撤销挂单时，需要参考该值，与撤单当时的高度值 $\small H_g$，计算用户挂单的成交情况。
+ 
+$\small P_0$ 是交易对当前的价格，$\small I_t$ 是与该价格对应的 $\small tick$ 值。
+
+$\small F_t$ 是吃单交易的费率，缺省值是 30 个基点，对应 0.3% 的交易手续费，以 $\small token_0$ 计费。
+
+$\small F_t$ 是挂单交易的超期费率，以基点为单位。挂单、撤单交易本身是免费的，但如果挂单成交后长时间不撤回收益，超期撤回，就需要收取一定的手续费。该费用以成交后收到的 $\small token_1$ 金额按照比例收取。
+
+$\small F_o$ 是挂单触发内部交易的交易补偿费率，也是以 $\small token_1$ 计费。
+
+$\small G_t$ 是挂单价格区间 $\small (P_l, P_u)$ 的最大间隔。由于挂单交易有可能会触发内部交易补偿机制，上下价差越大，这样的处理就可能越多，链上费用就越多，所以设计一个价差上限进行限制。如果用户确实希望挂单有比较大的价差，可以拆成多个挂单处理。
+
+### 3.4.2 Tick 状态
+
+合约内部存储一个 $tick$ 索引到 $\small tickInfo$ 结构的映射，$\small tickInfo$ 格式如下:
+
+$$ 
+  \small \newcommand{\arraystretch}{1.8} \begin{array}  {| c ||  c | c |}
+  \hline
+  \hspace{0.6cm} \text{类型} \hspace{0.6cm} & \hspace{1cm} \text{变量名称} \hspace{1cm}  &\hspace{0.6cm} \text{标识} \hspace{0.6cm}   \\
+  \hline
+  uint128  &{liquidityGross}        &{L_g}           \\
+  \hline 
+  int128   &{liquidityNet}           &{L_n}           \\
+  \hline
+  uint96  &{amountReceived}         &{R_r}            \\
+  \hline
+  uint96  &{amountOffset}           &{R_o}            \\
+  \hline  
+  uint160  &{sqrtPriceTickX96}       &{\sqrt{P_t}}     \\
+  \hline  
+  uint32  &{tickHeight}             &{{H_t}}    \\
+  \hline  
+  bytes  &{clearanceList}       &{C_t}     \\
+  \hline  
+ \end{array}
+$$
+
+$\small tickInfo$ 可能会有两个不同的状态，一是其中的流动性完全没有成交，一是其中的流动性已经部分成交。
+
+当流动性完全没有成交时，$\small L_g$ 表示所有以该 $\small tick$ 为价格边界的挂单的总流动性。$\small L_n$ 表示所有以该 $\small tick$ 为价格边界的挂单的净流动性，即穿越该 $\small tick$ 时流动性的变化量。此时 $\small R_r, R_o$ 没有意思，其值为 0.
+
+当流动性部分成交时，$\small L_g$ 表示该 $\small tick$ 上方价格区间的总的流动性，$\small L_n$ 表示该价格区间经过流动性再平衡后的剩余净流动性。$\small R_r$ 表示流动性部分成交后收到的 $\small token_1$ 的数量，$\small R_o$ 表示所有后发挂单的内部交易手续费与前向价差补偿费的总和。
+
+$\small \sqrt{P_t}$ 是该 $\small tick$ 对应的价格，预存该价格可以优化交易性能。
+
+$\small H_t$ 是与该 $\small tick$ 相关的所有流动性挂单的最低 $\small poolHeight$，在跨越该流动性区间时，$\small H_t$ 会作为 $\small X_t$ (见$\small 3.4.3$) 保存在对应清算列表项中。
+
+当价格上穿价格区间时，下端 $\small tick$ 中的 $\small L_g, L_n, R_r, R_o, H_t$ 都会被清零。上端 $\small tick$ 中的 $\small L_g$, $\small L_n$, $\small R_r$, $\small R_o$, $\small H_t$ 会被更新。
+
+$\small C_t$ 是该 $\small tick$ 所有上穿高度 $\small H_g$ 的记录，当价格上穿该 $\small tick$ 时，全局 $\small H_g$ 会添加到 $\small C_t$ 的最后。当清算列表中与该高度对应的成交记录中的流动性全部撤走后，该高度会从 $\small C_t$ 中清除。当 $\small C_t$ 总长度为0，并且 $\small L_g$ 也为 0 时，该 $\small tick$ 会被表示为未初始化状态。
+
+### 3.4.3 清算列表
+
+合约会维护一个 $\small H_g$ 到跨越 $\small tick$ 的成交结果信息的映射，用于计算用户撤单时的收益。
+
+$$ 
+  \small \newcommand{\arraystretch}{1.8} \begin{array}  {| c ||  c | c |}
+  \hline
+  \hspace{0.6cm} \text{类型} \hspace{0.6cm} & \hspace{1cm} \text{变量名称} \hspace{1cm}  &\hspace{0.6cm} \text{标识} \hspace{0.6cm}   \\
+  \hline
+  uint128  &{liquiditySold}        &{L_s}           \\
+  \hline
+  uint96  &{amountReceived}        &{R_r}           \\
+  \hline
+  uint24  &{crossTick}  &{X_t}  \\
+  \hline  
+ \end{array}
+$$
+
+$\small L_s$ 是上穿 $\small tick$ 时，在当前价格区间的总的流动性。
+
+$\small R_r$ 是出售总流动性收到的总的 $\small token_1$ 的数量。用户挂单按照挂单的流动性按比例分享 $\small R_r$。$\small R_r$ 的值，是直接出售 $\small token_0$ 收到的 $\small token_1$ 数量，与收到的所有补偿收益的总和。
+
+$\small X_t$ 是跨越 $\small tick$ 时，与其对应的 $\small tickInfo$ 中 $\small H_t$ 的值。
+
+### 3.4.4 挂单信息
+
+  用户的挂单包括如下信息：
+
+$$ 
+  \small \newcommand{\arraystretch}{1.8} \begin{array}  {| c ||  c | c |}
+  \hline
+  \hspace{0.6cm} \text{类型} \hspace{0.6cm} & \hspace{1cm} \text{变量名称} \hspace{1cm}  &\hspace{0.6cm} \text{标识} \hspace{0.6cm}   \\
+    \hline
+    uint128  &{liquidity}        &{L_p}           \\
+    \hline
+    uint32  &{poolHeight}         &{H_p}  \\
+    \hline
+    uint96  &{amountReceived}    &{D_p}           \\
+    \hline
+  \end{array}
+$$
+
+$\small L_p$ 是挂单的流动性。$\small H_p$ 是挂单时，交易对当时的高度值。 $\small D_p$ 是挂单交易的总补偿金额，包括内部交易补偿费，以及价差补偿费。该金额是一个虚拟金额，当用户撤回挂单时，该金额会从用户接收到的 $\small token_1$ 金额中扣除。
+
+挂单的价格范围，以及交易对的信息是编码在挂单信息的印射索引中的，交易对合约中不需要明确存储，但 Unibuy 协议的路由合约会进行存储。
+
+## 4. 订单
+
+用户下单时，需要指定交易的两个资产 $\small token_0, \ token_1$，以及买入或卖出的价格及数量，Unibuy 合约会自动根据两个 Token 以及用户的交易意图匹对对应的单向交易对，判断价格是否可以按照吃单处理。如果价格合适，就按照吃单成交，价格不合适，就按照挂单处理。如果只能部分成交，则先按照吃单处理一部分，未成交部分可以撤销或按照挂单处理。
+
+### 4.1 挂单
+
+挂单是用户的订单没法直接成交，合约需要将订单流动性与交易对已有的流动性进行聚合，等待后续吃单成交。挂单交易有可能会触发区间流动性的内部交易，以及前向补偿处理，导致挂单用户需要以 $\small token_1$ 形式支付一定数量的补偿。该补偿不需要用户立即支付，而是在后面挂单成交后从成交收入中扣除。即使用户挂单完全没有成交，内部交易的收益也是可以覆盖该补偿的。该补偿不是挂单用户的损失，而是避免内部交易套利的一种合理的价值平衡。
+
+挂单给出的价格范围，不得高于镜像交易对的价格，高出部分是可以立即成交的，合约会进行相应检查。
+
+### 4.2 撤单
+
+用户可以撤销自己的挂单，不管是否成交、部分成交，或完全成交。
+
+即使用户的挂单完全没有成交，撤单用户收到的 $\small token_0$ 数量不一定就是用户挂单时支付的数量。如果触发内部交易机制以及前向补偿机制，用户有可能收到数量减少的 $\small token_0$ 和一定数量的 $token_1$。
+
+如果用户的挂单完全成交，用户需要及时撤回挂单。一般要求是一周，一周内用户撤单是免费的。超过一周后，本协议就会允许第三方代替用户撤回订单，用户需要支付第三方一定的撤单服务费，费率一般为 $\small 0.2\%$。Unibuy 协议项目方也会提供这样的服务。该功能可以避免大量已经成交的挂单堆积在合约中，影响挂单及撤单的性能。
+
+### 4.3 吃单
+
+当用户订单允许部分或全部成交时，订单会按照吃单处理。吃单需要支付交易手续费，费率一般是 $\small 0.3\%$，以 $\small token_1$ 支付。
+
+吃单会立即成交。如果用户订单不是可以全部立即成交的吃单，用户也可以指定下面几种处理方式：
+&nbsp;&nbsp;&nbsp;&nbsp; a. 部分成交，其余撤销；
+&nbsp;&nbsp;&nbsp;&nbsp; b. 部分成交，其余挂单；
+&nbsp;&nbsp;&nbsp;&nbsp; c. 不成交，全部撤销；
+
+### 4.4 转单
+
+转单是用户在挂单的同时，可以指定如果挂单全部成交，成交后收到的 $\small token_1$ 可以当做镜像交易对的 $\small token_0$ 在指定的价格范围内再次挂单。
+
+转单不会自动执行，需要由用户、第三方服务商，或 Unibuy 协议项目方触发。如果不是用户自己触发，用户需要支付一定的费用。
+
+## 5. 总结
+
+Unibuy 协议是恒定乘积自动做市商类型 DEX 协议的一次重大演进，可以解决现有 DEX 存在的三明治攻击问题、无偿损失等问题。传统的做市商依然可以在协议中通过挂单、吃单进行做市，但其交易行为在协议层面与普通交易用户是一样的，协议也不再需要将交易费用让渡给做市商。这使得协议项目方能够从交易手续费用中获得应有的收益，以支撑项目的持续稳定发展。普通用户也可以将闲置资产挂单销售，成交后利用转单的方式自动完成高抛低吸，实现市场波动的套利。如果大量个人用户参与该套利，则可以一定程度上抑制市场波动，也为普通用户带来被动收益。
+
+Unibuy 协议可以提供与中心化交易所类似的订单簿体验，但不再需要将用户资产托管到中心化交易所，导致中心化风险。由于区块链交易的时延特性以及不连续性，用户挂单时，应该是审慎认真的，是用户意愿的真实体现。用户挂单在链上都是真实可见的，可以避免 CEX 中一些用户反复挂单撤单、自卖自卖、操纵价格、误导交易用户的问题。
+
+DEX 协议需要持续演进和发展，Unibuy 协议是 DEX 协议具有一定突破意义的探索和进步，相信将来还会有更多更好的关于 DEX 协议的创新。
+
+## 参考文献
+
+[1] Hayden Adams, Uniswap Whitepaper, [https://hackmd.io/C-DvwDSfSxuh-Gd4WKE_ig](https://hackmd.io/C-DvwDSfSxuh-Gd4WKE_ig).
+
+[2] Hayden Adams et al, Uniswap V2 Core, [https://uniswap.org/whitepaper.pdf](https://uniswap.org/whitepaper.pdf).
+
+[3] Hayden Adams et al, Uniswap v3 Core. [https://uniswap.org/whitepaper-v3.pdf](https://uniswap.org/whitepaper-v3.pdf).
+
+[4] Hayden Adams et al, Uniswap v4 Core. [https://uniswap.org/whitepaper-v4.pdf](https://uniswap.org/whitepaper-v4.pdf)
+
+[5] Balancer, [Impermanent Loss](
+https://docs-v2.balancer.fi/concepts/advanced/impermanent-loss.html)
+
+[6] flashbots, [https://docs.flashbots.net/](https://docs.flashbots.net/)
+
+[7] Maximal extractable value (MEV). [https://ethereum.org/en/developers/docs/mev/](https://ethereum.org/en/developers/docs/mev/)
+
+[8] EtherDelta, A decentralized peer-to-peer cryptocurrency exchange built on Ethereum, [https://etherdelta.com](https://etherdelta.com)
+
+[9] Project Serum, [https://projectserum.medium.com](https://projectserum.medium.com)
+
+[10] Derik Lu, Feswap Exchange, [https://www.feswap.io/download](https://www.feswap.io/download)
+

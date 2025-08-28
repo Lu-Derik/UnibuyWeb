@@ -1,0 +1,34 @@
+---
+title: Unibuy DEX rotocol v0.1
+hide_title: true
+sidebar_label: Unibuy DEX Protocol v0.1
+---
+
+
+<style>{`
+.center {
+  width: auto;
+  display: table;
+  margin-left: auto;
+  margin-right: auto;
+}
+`}</style>
+
+# <center> Unibuy DEX Protocol v0.1 </center>
+
+<center> Derik Lu, ldru0519@gmail.com, July 2025</center>
+
+Unibuy is an order book-like exchange protocol based on the constant product formula. In centralized exchange order books, prices are user-defined single points, whereas in the Unibuy order books, prices are specified as price ranges along the constant product curve.
+
+Unibuy protocol sets up two mirrored one-way liquidity pools for each token pair, providing a trading experience similar to Uniswap’s two-way liquidity pools. The effect of one-way trading pairs is that a small price spread is automatically maintained between the two mirrored pairs, which effectively prevents sandwich attack, a common problem in current DEX trading.
+
+User orders are generally divided into two types: maker order and taker order. A maker order sells a specified amount of $\small token_0$ within a specified price range. The lower bound of the price range, after being mirrored, must be lower than the current price of the associated mirror pair, ensuring that the maker order does not get filled immediately. A taker order buys a specified amount of $\small token_0$ or sells a specified amount of $\small token_1$, provided that the highest acceptable price limit is above the current price. Taker orders always execute immediately.
+
+A one-way trading pair always sells $\small token_0$ and buys $\small token_1$. In the mirror pair, the definitions of $\small token_0$ and $\small token_1$ are reversed. From the perspective of the maker order users, a maker order is always selling $\small token_0$ and buying $\small token_1$. From the perspective of the taker order users, it is selling $\small token_1$ and buying $\small token_0$. The maker and taker orders act as counterparties to each other, and the buying and selling of the same token are completed through two linked mirror trading pairs.
+
+Taker orders always drive the price of $\small token_0$ up along the constant product curve, whereas maker orders may drive the price of the current trading pair down. While a user's maker order is fully or partially filled, if the token price reverses, this maker order does not passively buy back the sold $\small token_0$ as in the Uniswap protocol. This design can address the impermanent loss problem faced by liquidity providers in Uniswap.
+
+Unibuy protocol introduces a range liquidity rebalancing mechanism and a forward compensation mechanism for maker orders, which resolve internal arbitrage problem that might exist in maker order transaction, and allow for the aggregation of maker order liquidity across different price ranges.
+
+Liquidity in the Unibuy protocol is provided entirely by maker orders. There is no automated market maker (AMM) role as in Uniswap, so all trading fees paid by taker orders become the revenue of Unibuy protocol.
+
