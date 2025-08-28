@@ -14,7 +14,7 @@ import rehypeKatex from 'rehype-katex';
 const config = {
   title: 'My Site',
   tagline: 'Dinosaurs are cool',
-  favicon: 'img/favicon.ico',
+  favicon: 'img/unibuy.png',
 
   // Future flags, see https://docusaurus.io/docs/api/docusaurus-config#future
   future: {
@@ -114,7 +114,7 @@ const config = {
         ],
       },
       footer: {
-        copyright: `Copyright © ${new Date().getFullYear()} Unibuy DEX. Built with Docusaurus.`,
+        copyright: `Copyright © ${new Date().getFullYear()} Unibuy.fun, built with Docusaurus.`,
       },
       prism: {
         theme: prismThemes.github,
