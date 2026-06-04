@@ -133,7 +133,7 @@ When a user places a taker order, the virtual liquidity constant $\small L$ is a
 
 Equation (2.1.4) indicates that when an amount $\small \Delta x$ of one token is swapped for an amount $\small \Delta y$ of another token within the price range $\small (P_a, P_b)$, the average exchange price is $\small \sqrt{P_a * P_b}$.
 
-## 2.2 One-Sided Liquidity
+### 2.2 One-Sided Liquidity
 
 The Unibuy protocol inherits the virtual-liquidity design from Uniswap v3/v4, where all liquidity is divided into different tick intervals, that is, price ranges. Within a given tick interval, the virtual liquidity constant $\small L$ remains unchanged. During trading, when the price of the token pair changes and crosses a tick boundary, the liquidity constant $\small L$ is adjusted according to the information recorded for the crossed tick.
 
