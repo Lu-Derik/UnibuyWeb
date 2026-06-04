@@ -1,7 +1,8 @@
 ---
-title: Unibuy DEX rotocol v0.1
+id: Unibuy Protocol
+title: Unibuy DEX 协议 v0.2
 hide_title: true
-sidebar_label: Unibuy DEX 协议 v0.1
+sidebar_label: Unibuy DEX 协议 v0.2
 ---
 
 <style>{`
@@ -13,21 +14,22 @@ sidebar_label: Unibuy DEX 协议 v0.1
 }
 `}</style>
 
-# <center> Unibuy DEX 协议 v0.1 </center>
 
-<center> Derik Lu,  ldru0519@gmail.com, July 2025</center>
+# <center> Unibuy DEX 协议 v0.2 </center>
 
+<center> Derik Lu,  ldru0519@gmail.com, 2026年5月28日</center>
+
+## 0. 摘要
 Unibuy 是一个基于常量乘积公式实现的类订单簿交易协议。中心化交易所订单簿的价格是用户设定的单点价格，Unibuy 订单簿的价格是常量乘积曲线上用户指定的一个价格区间。
 
 Unibuy 协议为一对交易 Token 设置两个互为镜像关系的单向交易资金池，具有跟 Uniswap 的双向交易资金池相似的交易体验。单向交易对的效果是两个镜像交易对之间总会自动保持一个小的价差，该价差可以有效阻止目前 DEX 交易中大量存在的三明治攻击。
 
 用户的订单基本分成两类：挂单和吃单。挂单是在指定的价格范围内卖出指定数量的 $\small token_0$，要求价格范围的低端价格镜像转换后，必须低于关联镜像交易对的当前价格，确保挂单交易不会立即成交。吃单是在不超过指定最高限价的前提下买入指定数量的 $\small token_0$ 或卖出指定数量的 $\small token_1$，要求最高限价必须高于交易对的当前价格，吃单交易总是立即成交。
 
-单向交易对总是卖出 $\small token_0$，买入$\small token_1$，关联镜像交易对中 $\small token_0$ 和 $\small token_1$ 的定义是相反的。挂单交易从挂单用户看，总是卖出 $\small token_0$，买入 $\small token_1$。吃单交易从交易用户角度看，则是卖出 $\small token_1$，买入 $\small token_0$。挂单与吃单互为交易对手，同一 Token 的买入、卖出交易是由两个关联的镜像交易对完成的。
+单向交易对总是卖出 $\small token_0$，买入 $\small token_1$，关联镜像交易对中 $\small token_0$ 和 $\small token_1$ 的定义则正好相反。从挂单用户的角度看，挂单始终是卖出 $\small token_0$、买入 $\small token_1$；从吃单用户的角度看，则是卖出 $\small token_1$、买入 $\small token_0$。挂单与吃单互为交易对手，同一 Token 的买入和卖出由两个关联的镜像交易对共同完成。
 
-用户的吃单交易总是驱动 $\small token_0$ 价格沿着常量乘积曲线单向上升，而用户的挂单交易则可能驱动当前交易对的价格下降。Unibuy 协议的用户挂单全部或部分成交后，如果价格逆转，用户挂单不会像 Uniswap 协议一样，被动买入已出售 $\small token_0$，这可以解决 Uniswap 协议的做市商无偿损失问题。
+用户的吃单交易总是驱动 $\small token_0$ 的价格沿常量乘积曲线单向上升，而用户的挂单交易则可能压低当前交易对的价格。Unibuy 协议中的挂单在全部或部分成交后，即使价格随后反转，也不会像 Uniswap 协议中的流动性那样被动买回已卖出的 $\small token_0$，从而避免 Uniswap 做市商面临的无偿损失问题。
 
 Unibuy 协议设计了区间流动性再平衡机制以及挂单前向补偿机制，可以解决挂单交易中可能隐含存在的内部交易套利问题，实现不同价格区间的用户挂单流动性的聚合。
 
 Unibuy 协议的流动性由用户的挂单提供，没有 Uniswap 协议中的自动做市商的角色，用户的交易费用全部成为 Unibuy 协议的协议收入。
-
